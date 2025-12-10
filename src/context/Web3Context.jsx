@@ -6,20 +6,20 @@ import EthereumProvider from "@walletconnect/ethereum-provider";
 // Create Context
 const Web3Context = createContext();
 
-// ------------------------- IMPORTANT CONFIG -------------------------
+// ---------------- CONFIG ----------------
 
-// Your Deployed Wallet Contract
+// Your deployed ZKTapWallet
 const CONTRACT_ADDRESS = "0xfB51ddCBd96743467F86D24a0AdAc78dAADCC60F";
 
 // Alchemy RPC (Sepolia)
-const RPC_URL = `https://eth-sepolia.g.alchemy.com/v2/${
-  import.meta.env.VITE_ALCHEMY_API_KEY
-}`;
+const RPC_URL = import.meta.env.VITE_ALCHEMY_API_KEY
+  ? `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`
+  : undefined;
 
-// WalletConnect Project ID (YOU PROVIDED)
+// WalletConnect v2 Project ID (you gave)
 const WC_PROJECT_ID = "7e5997b3d52e7a9f1d75fa1a3940b132";
 
-// ------------------------- CONTRACT ABI -------------------------
+// ZKTapWallet ABI
 const CONTRACT_ABI = [
   {"inputs":[{"internalType":"address","name":"_verifier","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
   {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"uint256","name":"newBalance","type":"uint256"}],"name":"BalanceUpdated","type":"event"},
@@ -43,7 +43,7 @@ const CONTRACT_ABI = [
   {"inputs":[{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"withdrawBalance","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
-// ------------------------- MAIN CONTEXT LOGIC -------------------------
+// --------------- PROVIDER COMPONENT ---------------
 
 export function Web3Provider({ children }) {
   const [web3, setWeb3] = useState(null);
@@ -53,30 +53,35 @@ export function Web3Provider({ children }) {
   const [balance, setBalance] = useState("0");
   const [loading, setLoading] = useState(false);
 
-  // Connect Wallet
   const connectWallet = async () => {
     try {
       setLoading(true);
-
       let activeProvider;
 
-      // CASE 1 → Desktop Chrome or MetaMask in-app browser
+      // 1) Desktop / MetaMask browser → use injected provider
       if (window.ethereum) {
-        console.log("🦊 Using MetaMask injected provider");
+        console.log("🦊 Using injected MetaMask");
         activeProvider = window.ethereum;
         await activeProvider.request({ method: "eth_requestAccounts" });
-
       } else {
-        // CASE 2 → Phone Chrome → must use WalletConnect v2
-        console.log("🔗 Using WalletConnect v2 provider");
+        // 2) Normal mobile browser (Chrome) → WalletConnect v2
+        if (!WC_PROJECT_ID) {
+          alert("WalletConnect Project ID not configured");
+          return;
+        }
+        console.log("🔗 Using WalletConnect v2");
 
         const wc = await EthereumProvider.init({
           projectId: WC_PROJECT_ID,
-          chains: [11155111],
-          rpcMap: {
-            11155111: RPC_URL,
+          chains: [11155111], // Sepolia
+          rpcMap: RPC_URL ? { 11155111: RPC_URL } : undefined,
+          showQrModal: true,  // let WC handle deep-link + 'Open in MetaMask'
+          metadata: {
+            name: "ZK Tap Wallet",
+            description: "Zero-knowledge NFC tap wallet",
+            url: window.location.origin,
+            icons: ["https://zktapwallet.netlify.app/icon.png"],
           },
-          showQrModal: true,
         });
 
         await wc.connect();
@@ -85,11 +90,13 @@ export function Web3Provider({ children }) {
 
       const web3Instance = new Web3(activeProvider);
       const accounts = await web3Instance.eth.getAccounts();
+      if (!accounts || accounts.length === 0) {
+        throw new Error("No accounts found from wallet");
+      }
 
       const code = await web3Instance.eth.getCode(CONTRACT_ADDRESS);
       if (!code || code === "0x") {
-        alert("❌ Invalid contract address — not deployed on chain!");
-        return;
+        throw new Error("Contract not deployed at configured address");
       }
 
       const contractInstance = new web3Instance.eth.Contract(
@@ -103,45 +110,39 @@ export function Web3Provider({ children }) {
       setContract(contractInstance);
 
       await fetchBalance(contractInstance, accounts[0]);
-
-      console.log("🎉 Connected:", accounts[0]);
-
+      console.log("✅ Connected:", accounts[0]);
     } catch (error) {
       console.error("Connection error:", error);
-      alert(error.message || "Wallet connection failed");
+      // Show cleaner message
+      alert(error?.message || "Failed to connect wallet");
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch Balance
   const fetchBalance = async (contractInstance, userAccount) => {
     if (!contractInstance || !userAccount) return;
-
     try {
       const bal = await contractInstance.methods.getBalance(userAccount).call();
       setBalance(Web3.utils.fromWei(bal.toString(), "ether"));
-    } catch (error) {
-      console.error("Balance fetch error:", error);
+    } catch (e) {
+      console.error("Balance fetch error:", e);
     }
   };
 
-  // Disconnect Wallet
   const disconnectWallet = async () => {
     try {
       if (provider && provider.disconnect) {
         await provider.disconnect();
       }
     } catch (e) {
-      console.warn("Provider close error:", e);
+      console.warn("Provider disconnect error:", e);
     }
-
     setProvider(null);
     setWeb3(null);
     setAccount(null);
     setContract(null);
     setBalance("0");
-
     console.log("🔌 Wallet disconnected");
   };
 
@@ -149,7 +150,7 @@ export function Web3Provider({ children }) {
   useEffect(() => {
     if (!provider || !provider.on) return;
 
-    const handler = (accounts) => {
+    const onAccountsChanged = (accounts) => {
       if (!accounts || accounts.length === 0) {
         disconnectWallet();
       } else {
@@ -158,14 +159,13 @@ export function Web3Provider({ children }) {
       }
     };
 
-    provider.on("accountsChanged", handler);
+    provider.on("accountsChanged", onAccountsChanged);
 
     return () => {
-      provider.removeListener?.("accountsChanged", handler);
+      provider.removeListener?.("accountsChanged", onAccountsChanged);
     };
   }, [provider, contract]);
 
-  // Context value
   const value = {
     web3,
     account,
