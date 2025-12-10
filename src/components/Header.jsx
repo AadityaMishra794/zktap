@@ -1,7 +1,9 @@
-import {useWeb3} from "../context/Web3Context"
+// src/components/Header.jsx
 import { useState } from "react";
-import {styles} from "../App"
+import { useWeb3 } from "../context/Web3Context";
+import { styles } from "../App";
 import ConnectWalletButton from "./ConnectWalletButton";
+
 function Header() {
   const { account, balance, disconnectWallet } = useWeb3();
   const [showDropdown, setShowDropdown] = useState(false);
@@ -20,29 +22,33 @@ function Header() {
           </svg>
           <span style={styles.logoText}>ZK Tap</span>
         </div>
-        
+
         {account ? (
           <div style={styles.profileContainer}>
-            <button 
+            <button
               style={styles.profileButton}
               onClick={() => setShowDropdown(!showDropdown)}
             >
               <div style={styles.profileIcon}>
-                {account.slice(0, 2).toUpperCase()}
+                {account.slice(2, 4).toUpperCase()}
               </div>
             </button>
-            
+
             {showDropdown && (
               <div style={styles.dropdown}>
                 <div style={styles.dropdownItem}>
                   <span style={styles.dropdownLabel}>Address:</span>
-                  <span style={styles.dropdownValue}>{formatAddress(account)}</span>
+                  <span style={styles.dropdownValue}>
+                    {formatAddress(account)}
+                  </span>
                 </div>
                 <div style={styles.dropdownItem}>
                   <span style={styles.dropdownLabel}>Balance:</span>
-                  <span style={styles.dropdownValue}>{parseFloat(balance).toFixed(4)} ETH</span>
+                  <span style={styles.dropdownValue}>
+                    {parseFloat(balance || "0").toFixed(4)} ETH
+                  </span>
                 </div>
-                <button 
+                <button
                   style={styles.disconnectButton}
                   onClick={() => {
                     disconnectWallet();
@@ -61,4 +67,5 @@ function Header() {
     </header>
   );
 }
-export default Header
+
+export default Header;
