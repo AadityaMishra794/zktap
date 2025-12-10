@@ -11,11 +11,13 @@ const CONTRACT_ADDRESS =
   import.meta.env.VITE_WALLET_ADDRESS ||
   "0xfB51ddCBd96743467F86D24a0AdAc78dAADCC60F";
 
-const RPC_URL = `https://eth-sepolia.g.alchemy.com/v2/${
+// RPC for Sepolia (Alchemy)
+const RPC_URL =
   import.meta.env.VITE_ALCHEMY_API_KEY
-}`;
+    ? `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`
+    : "https://eth-sepolia.g.alchemy.com/v2/YOUR_FALLBACK_KEY_HERE";
 
-// ⚠️ same ABI you already had
+// Your ZKTapWallet ABI
 const CONTRACT_ABI = [
   { "inputs":[{"internalType":"address","name":"_verifier","type":"address"}],"stateMutability":"nonpayable","type":"constructor" },
   { "anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"uint256","name":"newBalance","type":"uint256"}],"name":"BalanceUpdated","type":"event" },
@@ -48,7 +50,7 @@ export function Web3Provider({ children }) {
   const [balance, setBalance] = useState("0");
   const [loading, setLoading] = useState(false);
 
-  // Connect Wallet Function (MetaMask or WalletConnect)
+  // Connect Wallet (MetaMask on desktop, WalletConnect on mobile)
   const connectWallet = async () => {
     try {
       setLoading(true);
@@ -56,14 +58,14 @@ export function Web3Provider({ children }) {
       let activeProvider;
 
       if (window.ethereum) {
-        // Desktop MetaMask / MetaMask browser
+        // Desktop Chrome with MetaMask extension OR MetaMask mobile browser
         activeProvider = window.ethereum;
         await activeProvider.request({ method: "eth_requestAccounts" });
       } else {
-        // Chrome mobile etc. → use WalletConnect to reach MetaMask Mobile
+        // No injected provider → use WalletConnect (Chrome mobile, etc.)
         const wcProvider = new WalletConnectProvider({
           rpc: {
-            11155111: RPC_URL, // Sepolia
+            11155111: RPC_URL, // Sepolia chainId
           },
           chainId: 11155111,
         });
@@ -75,10 +77,10 @@ export function Web3Provider({ children }) {
       const web3Instance = new Web3(activeProvider);
       const accounts = await web3Instance.eth.getAccounts();
 
-      // sanity check: contract address really is a contract
+      // Sanity check: contract address really is a contract
       const code = await web3Instance.eth.getCode(CONTRACT_ADDRESS);
       if (!code || code === "0x") {
-        alert("Configured contract address is not a contract. Check VITE_WALLET_ADDRESS.");
+        alert("Configured contract address is not a contract. Check CONTRACT_ADDRESS.");
         return;
       }
 
@@ -105,6 +107,7 @@ export function Web3Provider({ children }) {
 
   // Fetch Balance Function
   const fetchBalance = async (contractInstance, userAccount) => {
+    if (!contractInstance || !userAccount) return;
     try {
       const userBalance = await contractInstance.methods
         .getBalance(userAccount)
@@ -118,11 +121,14 @@ export function Web3Provider({ children }) {
 
   // Disconnect Wallet Function
   const disconnectWallet = async () => {
-    if (provider && provider.close) {
-      try {
-        await provider.close();
-      } catch (_) {}
+    try {
+      if (provider && provider.close) {
+        await provider.close(); // WalletConnect-specific
+      }
+    } catch (e) {
+      console.warn("Error closing provider:", e);
     }
+
     setProvider(null);
     setWeb3(null);
     setAccount(null);
@@ -131,7 +137,7 @@ export function Web3Provider({ children }) {
     console.log("Wallet disconnected");
   };
 
-  // Listen for account changes on whatever provider is active
+  // Listen for account changes
   useEffect(() => {
     if (!provider || !provider.on) return;
 
@@ -149,7 +155,7 @@ export function Web3Provider({ children }) {
     provider.on("accountsChanged", handleAccountsChanged);
 
     return () => {
-      if (provider.removeListener) {
+      if (provider && provider.removeListener) {
         provider.removeListener("accountsChanged", handleAccountsChanged);
       }
     };
@@ -166,9 +172,7 @@ export function Web3Provider({ children }) {
     fetchBalance,
   };
 
-  return (
-    <Web3Context.Provider value={value}>{children}</Web3Context.Provider>
-  );
+  return <Web3Context.Provider value={value}>{children}</Web3Context.Provider>;
 }
 
 // Custom hook to use Web3 context
