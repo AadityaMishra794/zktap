@@ -14,7 +14,7 @@ const CONTRACT_ADDRESS = "0xfB51ddCBd96743467F86D24a0AdAc78dAADCC60F";
 // Alchemy RPC (Sepolia)
 const RPC_URL = import.meta.env.VITE_ALCHEMY_API_KEY
   ? `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`
-  : undefined;
+  : "https://eth-sepolia.g.alchemy.com/v2/demo";
 
 // WalletConnect v2 Project ID (you gave)
 const WC_PROJECT_ID = "7e5997b3d52e7a9f1d75fa1a3940b132";
@@ -74,8 +74,21 @@ export function Web3Provider({ children }) {
         const wc = await EthereumProvider.init({
           projectId: WC_PROJECT_ID,
           chains: [11155111], // Sepolia
-          rpcMap: RPC_URL ? { 11155111: RPC_URL } : undefined,
-          showQrModal: true,  // let WC handle deep-link + 'Open in MetaMask'
+          optionalChains: [1, 137], // Add optional chains for better compatibility
+          rpcMap: {
+            11155111: RPC_URL,
+            1: "https://eth-mainnet.g.alchemy.com/v2/demo",
+          },
+          showQrModal: true,
+          qrModalOptions: {
+            themeMode: "dark",
+            themeVariables: {
+              "--wcm-z-index": "9999"
+            },
+            explorerRecommendedWalletIds: [
+              "c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96", // MetaMask
+            ],
+          },
           metadata: {
             name: "ZK Tap Wallet",
             description: "Zero-knowledge NFC tap wallet",
@@ -84,14 +97,32 @@ export function Web3Provider({ children }) {
           },
         });
 
-        await wc.connect();
+        // Enable session with proper error handling
+        try {
+          await wc.enable();
+        } catch (enableError) {
+          console.error("WalletConnect enable error:", enableError);
+          // Retry connection with connect() if enable() fails
+          await wc.connect();
+        }
+        
         activeProvider = wc;
       }
 
       const web3Instance = new Web3(activeProvider);
+      
+      // Wait a bit for provider to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const accounts = await web3Instance.eth.getAccounts();
       if (!accounts || accounts.length === 0) {
         throw new Error("No accounts found from wallet");
+      }
+
+      // Verify we're on the right network
+      const chainId = await web3Instance.eth.getChainId();
+      if (Number(chainId) !== 11155111) {
+        console.warn(`Connected to chain ${chainId}, expected Sepolia (11155111)`);
       }
 
       const code = await web3Instance.eth.getCode(CONTRACT_ADDRESS);
@@ -114,7 +145,10 @@ export function Web3Provider({ children }) {
     } catch (error) {
       console.error("Connection error:", error);
       // Show cleaner message
-      alert(error?.message || "Failed to connect wallet");
+      const message = error?.message || "Failed to connect wallet";
+      if (!message.includes("User rejected")) {
+        alert(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -159,10 +193,16 @@ export function Web3Provider({ children }) {
       }
     };
 
+    const onChainChanged = () => {
+      window.location.reload();
+    };
+
     provider.on("accountsChanged", onAccountsChanged);
+    provider.on("chainChanged", onChainChanged);
 
     return () => {
       provider.removeListener?.("accountsChanged", onAccountsChanged);
+      provider.removeListener?.("chainChanged", onChainChanged);
     };
   }, [provider, contract]);
 
