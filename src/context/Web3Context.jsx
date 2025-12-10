@@ -99,37 +99,34 @@ export function Web3Provider({ children }) {
           throw new Error("WalletConnect Project ID not configured");
         }
 
-        // Initialize WalletConnect with proper config for Android
+        // Initialize WalletConnect - MINIMAL config to avoid MetaMask bugs
         const wc = await EthereumProvider.init({
           projectId: WC_PROJECT_ID,
           showQrModal: true,
-          qrModalOptions: {
-            themeMode: "dark",
-            themeVariables: {
-              "--wcm-z-index": "99999",
-            },
-          },
           metadata: {
             name: "ZK Tap Wallet",
             description: "Zero-knowledge NFC tap wallet",
             url: window.location.origin,
             icons: ["https://zktapwallet.netlify.app/icon.png"],
           },
-          // Use only optionalChains for better Android compatibility
+          // CRITICAL: Use ONLY optionalChains, NO chains parameter
           optionalChains: [11155111, 1, 137],
+          // CRITICAL: Use ONLY optionalMethods, NO methods parameter
           optionalMethods: [
             "eth_sendTransaction",
-            "eth_signTransaction",
-            "eth_sign",
+            "eth_signTransaction", 
             "personal_sign",
             "eth_signTypedData",
-            "eth_signTypedData_v4",
           ],
+          // REQUIRED
           events: ["chainChanged", "accountsChanged"],
           rpcMap: {
             11155111: RPC_URL,
             1: "https://eth-mainnet.g.alchemy.com/v2/demo",
             137: "https://polygon-rpc.com",
+          },
+          qrModalOptions: {
+            themeMode: "dark",
           },
         });
 
@@ -150,9 +147,9 @@ export function Web3Provider({ children }) {
           disconnectWallet();
         });
 
-        // Connect
-        console.log("⏳ Opening WalletConnect modal...");
-        await wc.connect();
+        // Connect - use enable() instead of connect() for better MetaMask compatibility
+        console.log("⏳ Connecting to wallet...");
+        await wc.enable();
         
         console.log("✅ Connected via WalletConnect");
         activeProvider = wc;
