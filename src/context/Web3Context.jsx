@@ -74,24 +74,12 @@ export function Web3Provider({ children }) {
         // CRITICAL: Must include optionalChains, events, and optionalMethods
         const wc = await EthereumProvider.init({
           projectId: WC_PROJECT_ID,
-          chains: [11155111], // Sepolia - required chain
-          optionalChains: [1, 137], // REQUIRED: Mainnet, Polygon
-          methods: [
-            "eth_sendTransaction",
-            "eth_signTransaction",
-            "eth_sign",
-            "personal_sign",
-            "eth_signTypedData",
-          ],
-          optionalMethods: [
-            "eth_signTypedData_v4",
-            "eth_sendRawTransaction",
-          ],
-          events: ["chainChanged", "accountsChanged"], // REQUIRED
-          rpcMap: {
-            11155111: RPC_URL,
-            1: "https://eth-mainnet.g.alchemy.com/v2/demo",
-            137: "https://polygon-rpc.com",
+          showQrModal: true,
+          qrModalOptions: {
+            themeMode: "dark",
+            themeVariables: {
+              "--wcm-z-index": "99999",
+            },
           },
           metadata: {
             name: "ZK Tap Wallet",
@@ -99,12 +87,24 @@ export function Web3Provider({ children }) {
             url: window.location.origin,
             icons: ["https://zktapwallet.netlify.app/icon.png"],
           },
-          showQrModal: true,
-          qrModalOptions: {
-            themeMode: "dark",
-            themeVariables: {
-              "--wcm-z-index": "99999",
-            },
+          // Use optionalChains instead of chains for better compatibility
+          optionalChains: [11155111, 1, 137],
+          // REQUIRED for v2.23.0+
+          optionalMethods: [
+            "eth_sendTransaction",
+            "eth_signTransaction",
+            "eth_sign",
+            "personal_sign",
+            "eth_signTypedData",
+            "eth_signTypedData_v4",
+            "eth_sendRawTransaction",
+          ],
+          // REQUIRED for v2.23.0+
+          events: ["chainChanged", "accountsChanged"],
+          rpcMap: {
+            11155111: RPC_URL,
+            1: "https://eth-mainnet.g.alchemy.com/v2/demo",
+            137: "https://polygon-rpc.com",
           },
         });
 
