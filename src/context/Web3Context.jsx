@@ -1,7 +1,6 @@
 // src/context/Web3Context.jsx
 import React, { createContext, useState, useContext, useEffect } from "react";
 import Web3 from "web3";
-import EthereumProvider from "@walletconnect/ethereum-provider";
 
 // Create Context
 const Web3Context = createContext();
@@ -15,9 +14,6 @@ const CONTRACT_ADDRESS = "0xfB51ddCBd96743467F86D24a0AdAc78dAADCC60F";
 const RPC_URL = import.meta.env.VITE_ALCHEMY_API_KEY
   ? `https://eth-sepolia.g.alchemy.com/v2/${import.meta.env.VITE_ALCHEMY_API_KEY}`
   : "https://eth-sepolia.g.alchemy.com/v2/demo";
-
-// WalletConnect v2 Project ID
-const WC_PROJECT_ID = "7e5997b3d52e7a9f1d75fa1a3940b132";
 
 // ZKTapWallet ABI
 const CONTRACT_ABI = [
@@ -43,6 +39,18 @@ const CONTRACT_ABI = [
   {"inputs":[{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"withdrawBalance","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ];
 
+// Helper: Detect if in MetaMask's browser
+const isMetaMaskBrowser = () => {
+  return window.ethereum && window.ethereum.isMetaMask;
+};
+
+// Helper: Detect mobile device
+const isMobile = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+};
+
 // --------------- PROVIDER COMPONENT ---------------
 
 export function Web3Provider({ children }) {
@@ -52,125 +60,88 @@ export function Web3Provider({ children }) {
   const [contract, setContract] = useState(null);
   const [balance, setBalance] = useState("0");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const connectWallet = async () => {
     try {
       setLoading(true);
+      setError(null);
       let activeProvider;
 
-      // 1) Desktop / MetaMask browser → use injected provider
-      if (window.ethereum) {
-        console.log("🦊 Using injected MetaMask");
+      // Check if MetaMask is available
+      if (window.ethereum && window.ethereum.isMetaMask) {
+        console.log("🦊 Using MetaMask");
         activeProvider = window.ethereum;
-        await activeProvider.request({ method: "eth_requestAccounts" });
-      } else {
-        // 2) Mobile browser → WalletConnect
-        if (!WC_PROJECT_ID) {
-          alert("WalletConnect Project ID not configured");
+        
+        // Request accounts
+        const accounts = await activeProvider.request({ 
+          method: "eth_requestAccounts" 
+        });
+        
+        console.log("✅ Connected to MetaMask:", accounts[0]);
+      } 
+      // Mobile but not in MetaMask browser - show instruction
+      else if (isMobile()) {
+        console.log("📱 Mobile detected without MetaMask");
+        
+        // Create deep link to open your dApp in MetaMask browser
+        const currentUrl = window.location.href;
+        const metamaskDeepLink = `https://metamask.app.link/dapp/${currentUrl.replace(/^https?:\/\//, '')}`;
+        
+        const shouldOpenMetaMask = confirm(
+          "⚠️ For best experience on mobile, please use MetaMask's built-in browser.\n\n" +
+          "Tap OK to open this app in MetaMask, or Cancel to continue anyway."
+        );
+        
+        if (shouldOpenMetaMask) {
+          window.location.href = metamaskDeepLink;
           return;
         }
-        console.log("🔗 Initializing WalletConnect...");
-
-        // CRITICAL: Must include optionalChains, events, and optionalMethods
-        const wc = await EthereumProvider.init({
-          projectId: WC_PROJECT_ID,
-          showQrModal: true,
-          qrModalOptions: {
-            themeMode: "dark",
-            themeVariables: {
-              "--wcm-z-index": "99999",
-            },
-          },
-          metadata: {
-            name: "ZK Tap Wallet",
-            description: "Zero-knowledge NFC tap wallet",
-            url: window.location.origin,
-            icons: ["https://zktapwallet.netlify.app/icon.png"],
-          },
-          // Use optionalChains instead of chains for better compatibility
-          optionalChains: [11155111, 1, 137],
-          // REQUIRED for v2.23.0+
-          optionalMethods: [
-            "eth_sendTransaction",
-            "eth_signTransaction",
-            "eth_sign",
-            "personal_sign",
-            "eth_signTypedData",
-            "eth_signTypedData_v4",
-            "eth_sendRawTransaction",
-          ],
-          // REQUIRED for v2.23.0+
-          events: ["chainChanged", "accountsChanged"],
-          rpcMap: {
-            11155111: RPC_URL,
-            1: "https://eth-mainnet.g.alchemy.com/v2/demo",
-            137: "https://polygon-rpc.com",
-          },
-        });
-
-        console.log("✅ WalletConnect initialized");
-
-        // Listen for URI generation
-        wc.on("display_uri", (uri) => {
-          console.log("📱 Connection URI ready:", uri.substring(0, 50) + "...");
-        });
-
-        // Listen for connection
-        wc.on("connect", (session) => {
-          console.log("✅ Connected:", session);
-        });
-
-        // Listen for disconnection
-        wc.on("disconnect", () => {
-          console.log("🔌 Disconnected");
-          disconnectWallet();
-        });
-
-        // Connect using .connect() instead of .enable()
-        // This is more reliable for mobile
-        console.log("⏳ Opening connection modal...");
-        await wc.connect({
-          chains: [11155111],
-          rpcMap: {
-            11155111: RPC_URL,
-          },
-        });
-
-        console.log("✅ WalletConnect connected");
-        activeProvider = wc;
+        
+        // User chose to continue - show error
+        throw new Error(
+          "MetaMask not detected. Please install MetaMask mobile app and open this site in MetaMask's browser."
+        );
+      } 
+      // Desktop without MetaMask
+      else {
+        console.log("🖥️ Desktop without MetaMask");
+        throw new Error(
+          "MetaMask not detected. Please install MetaMask extension: https://metamask.io/download/"
+        );
       }
 
+      // Initialize Web3
       const web3Instance = new Web3(activeProvider);
       
-      // Small delay for provider stabilization
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      console.log("📋 Getting accounts...");
+      // Get accounts
       const accounts = await web3Instance.eth.getAccounts();
-      console.log("✅ Accounts:", accounts);
-      
       if (!accounts || accounts.length === 0) {
-        throw new Error("No accounts found. Please unlock your wallet.");
+        throw new Error("No accounts found. Please unlock MetaMask.");
       }
+
+      console.log("📋 Account:", accounts[0]);
 
       // Check network
       const chainId = await web3Instance.eth.getChainId();
       console.log("🔗 Chain ID:", chainId);
       
-      if (Number(chainId) !== 11155111) {
-        console.warn(`⚠️ Wrong network: ${chainId}. Need Sepolia (11155111)`);
+      const sepoliaChainId = 11155111;
+      
+      if (Number(chainId) !== sepoliaChainId) {
+        console.log("⚠️ Wrong network, switching to Sepolia...");
         
-        // Try to switch to Sepolia
         try {
+          // Try to switch to Sepolia
           await activeProvider.request({
             method: 'wallet_switchEthereumChain',
             params: [{ chainId: '0xaa36a7' }], // Sepolia hex
           });
           console.log("✅ Switched to Sepolia");
         } catch (switchError) {
-          console.error("❌ Network switch failed:", switchError);
+          // If Sepolia not added, add it
           if (switchError.code === 4902) {
-            // Add Sepolia network
+            console.log("➕ Adding Sepolia network...");
             try {
               await activeProvider.request({
                 method: 'wallet_addEthereumChain',
@@ -179,7 +150,7 @@ export function Web3Provider({ children }) {
                   chainName: 'Sepolia Test Network',
                   nativeCurrency: {
                     name: 'Sepolia ETH',
-                    symbol: 'ETH',
+                    symbol: 'SepoliaETH',
                     decimals: 18
                   },
                   rpcUrls: [RPC_URL],
@@ -188,56 +159,59 @@ export function Web3Provider({ children }) {
               });
               console.log("✅ Sepolia network added");
             } catch (addError) {
-              console.error("❌ Failed to add network:", addError);
-              throw new Error("Please manually switch to Sepolia testnet in your wallet");
+              console.error("❌ Failed to add Sepolia:", addError);
+              throw new Error("Please manually add Sepolia network in MetaMask");
             }
           } else {
-            throw new Error("Please switch to Sepolia testnet in your wallet");
+            console.error("❌ Network switch failed:", switchError);
+            throw new Error("Please manually switch to Sepolia network in MetaMask");
           }
         }
       }
 
-      // Verify contract
-      console.log("🔍 Checking contract deployment...");
+      // Verify contract deployment
+      console.log("🔍 Checking contract...");
       const code = await web3Instance.eth.getCode(CONTRACT_ADDRESS);
-      if (!code || code === "0x") {
-        throw new Error("Contract not found on Sepolia. Please ensure you're on the right network.");
+      if (!code || code === "0x" || code === "0x0") {
+        throw new Error(
+          `Contract not deployed at ${CONTRACT_ADDRESS} on Sepolia. Please verify the contract address.`
+        );
       }
+      console.log("✅ Contract found");
 
+      // Create contract instance
       const contractInstance = new web3Instance.eth.Contract(
         CONTRACT_ABI,
         CONTRACT_ADDRESS
       );
 
+      // Set state
       setProvider(activeProvider);
       setWeb3(web3Instance);
       setAccount(accounts[0]);
       setContract(contractInstance);
 
+      // Fetch balance
       console.log("💰 Fetching balance...");
       await fetchBalance(contractInstance, accounts[0]);
       
-      console.log("✅ Successfully connected!");
-      console.log("🎉 Account:", accounts[0]);
+      console.log("🎉 Successfully connected!");
     } catch (error) {
-      console.error("❌ Connection Error:", error);
+      console.error("❌ Connection error:", error);
       
-      // User-friendly error messages
+      // Set user-friendly error
       let message = error?.message || "Failed to connect wallet";
       
-      if (message.includes("User rejected") || message.includes("rejected")) {
+      // Don't show alert for user cancellation
+      if (message.includes("User rejected") || 
+          message.includes("User denied") ||
+          message.includes("rejected the request")) {
         console.log("User cancelled connection");
-        return; // Don't show error for user cancellation
+        setError("Connection cancelled by user");
+        return;
       }
       
-      if (message.includes("No accounts")) {
-        message = "No accounts found. Please unlock your wallet and try again.";
-      } else if (message.includes("Contract not found")) {
-        message = "Smart contract not deployed on this network. Please switch to Sepolia testnet.";
-      } else if (message.toLowerCase().includes("payload")) {
-        message = "Connection failed. Please try again or use a different wallet.";
-      }
-      
+      setError(message);
       alert(message);
     } finally {
       setLoading(false);
@@ -248,34 +222,29 @@ export function Web3Provider({ children }) {
     if (!contractInstance || !userAccount) return;
     try {
       const bal = await contractInstance.methods.getBalance(userAccount).call();
-      setBalance(Web3.utils.fromWei(bal.toString(), "ether"));
-      console.log("💰 Balance:", Web3.utils.fromWei(bal.toString(), "ether"), "ETH");
+      const balanceInEth = Web3.utils.fromWei(bal.toString(), "ether");
+      setBalance(balanceInEth);
+      console.log("💰 Balance:", balanceInEth, "ETH");
     } catch (e) {
       console.error("❌ Balance fetch error:", e);
     }
   };
 
-  const disconnectWallet = async () => {
-    try {
-      if (provider && provider.disconnect) {
-        await provider.disconnect();
-      }
-    } catch (e) {
-      console.warn("⚠️ Disconnect error:", e);
-    }
+  const disconnectWallet = () => {
     setProvider(null);
     setWeb3(null);
     setAccount(null);
     setContract(null);
     setBalance("0");
+    setError(null);
     console.log("🔌 Wallet disconnected");
   };
 
-  // Event listeners
+  // Event listeners for MetaMask
   useEffect(() => {
-    if (!provider || !provider.on) return;
+    if (!provider || !window.ethereum) return;
 
-    const onAccountsChanged = (accounts) => {
+    const handleAccountsChanged = (accounts) => {
       console.log("👤 Accounts changed:", accounts);
       if (!accounts || accounts.length === 0) {
         disconnectWallet();
@@ -285,24 +254,27 @@ export function Web3Provider({ children }) {
       }
     };
 
-    const onChainChanged = (chainId) => {
-      console.log("🔗 Chain changed to:", chainId);
+    const handleChainChanged = (chainId) => {
+      console.log("🔗 Chain changed:", chainId);
+      // Reload on chain change
       window.location.reload();
     };
 
-    const onDisconnect = (error) => {
-      console.log("🔌 Wallet disconnected:", error);
+    const handleDisconnect = () => {
+      console.log("🔌 Disconnected");
       disconnectWallet();
     };
 
-    provider.on("accountsChanged", onAccountsChanged);
-    provider.on("chainChanged", onChainChanged);
-    provider.on("disconnect", onDisconnect);
+    window.ethereum.on("accountsChanged", handleAccountsChanged);
+    window.ethereum.on("chainChanged", handleChainChanged);
+    window.ethereum.on("disconnect", handleDisconnect);
 
     return () => {
-      provider.removeListener?.("accountsChanged", onAccountsChanged);
-      provider.removeListener?.("chainChanged", onChainChanged);
-      provider.removeListener?.("disconnect", onDisconnect);
+      if (window.ethereum.removeListener) {
+        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+        window.ethereum.removeListener("chainChanged", handleChainChanged);
+        window.ethereum.removeListener("disconnect", handleDisconnect);
+      }
     };
   }, [provider, contract]);
 
@@ -312,9 +284,11 @@ export function Web3Provider({ children }) {
     contract,
     balance,
     loading,
+    error,
     connectWallet,
     disconnectWallet,
     fetchBalance,
+    isMetaMaskAvailable: isMetaMaskBrowser(),
   };
 
   return <Web3Context.Provider value={value}>{children}</Web3Context.Provider>;
